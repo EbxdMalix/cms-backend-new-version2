@@ -125,6 +125,12 @@ const limiter = rateLimit({
   max: 150, // Limit each IP to 150 requests per window
   standardHeaders: true, // Return rate limit info in standard headers
   legacyHeaders: false, // Disable the X-RateLimit-* headers
+  validate: { trustProxy: false },
+  skip: (req) => req.method === "OPTIONS", // Skip CORS preflight checks from rate limits
+  keyGenerator: (req) => {
+    const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.ip || "127.0.0.1";
+    return rawIp.split(",")[0].trim();
+  },
   message: {
     error: "Too Many Requests",
     message: "Too many requests from this IP, please try again after 15 minutes",

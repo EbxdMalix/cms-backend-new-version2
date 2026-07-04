@@ -2,6 +2,11 @@ const connectDB = require("../db/db");
 
 // Middleware to ensure database connection before handling requests
 const ensureDbConnection = async (req, res, next) => {
+  // Bypass DB connection checks for CORS preflight (OPTIONS) requests
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+
   try {
     await connectDB();
     next();
