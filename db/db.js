@@ -60,13 +60,18 @@ const connectDB = async () => {
     mongoose.set("strictQuery", false);
     mongoose.set("bufferCommands", false); // Disable buffering for serverless
 
-    const connection = await mongoose.connect(mongoUri, {
+    const connectionOptions = {
       dbName: "construction-system", // Enforce database namespace
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
-      minPoolSize: 1,
-    });
+    };
+
+    if (process.env.VERCEL !== "1") {
+      connectionOptions.minPoolSize = 1;
+    }
+
+    const connection = await mongoose.connect(mongoUri, connectionOptions);
 
     isConnected = true;
     console.log("✓ MongoDB connected successfully");
