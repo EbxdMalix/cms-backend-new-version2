@@ -59,6 +59,7 @@ const connectDB = async () => {
     // Configure mongoose for serverless environment
     mongoose.set("strictQuery", false);
     mongoose.set("bufferCommands", false); // Disable buffering for serverless
+    mongoose.set("autoIndex", false); // Disable automatic index builds in production
 
     const connectionOptions = {
       dbName: "construction-system", // Enforce database namespace
