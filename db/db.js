@@ -1,10 +1,12 @@
 const mongoose = require("mongoose");
 const dns = require("dns");
 
-try {
-  dns.setServers(["8.8.8.8", "1.1.1.1"]);
-} catch (err) {
-  console.warn("Warning: Could not set global DNS servers, falling back to system defaults:", err.message);
+if (process.env.VERCEL !== "1") {
+  try {
+    dns.setServers(["8.8.8.8", "1.1.1.1"]);
+  } catch (err) {
+    console.warn("Warning: Could not set global DNS servers, falling back to system defaults:", err.message);
+  }
 }
 
 let isConnected = false;
