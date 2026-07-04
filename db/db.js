@@ -65,6 +65,7 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
+      family: 4, // Force IPv4 to prevent serverless IPv6 DNS resolution hangs
     };
 
     if (process.env.VERCEL !== "1") {
