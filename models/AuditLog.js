@@ -46,5 +46,7 @@ const auditLogSchema = new mongoose.Schema(
 // Compound indexes for report filtering & dashboard timeline
 auditLogSchema.index({ tenantId: 1, createdAt: -1 });
 auditLogSchema.index({ tenantId: 1, entityType: 1, entityId: 1 });
+auditLogSchema.index({ tenantId: 1, userId: 1, createdAt: -1 });
+auditLogSchema.index({ tenantId: 1, action: 1, createdAt: -1 });
 
 module.exports = mongoose.model("AuditLog", auditLogSchema);

@@ -1,4 +1,5 @@
 const Customer = require("../models/Customer");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Get all customers
 // @route   GET /api/customers
@@ -106,10 +107,22 @@ exports.createCustomer = async (req, res) => {
       address,
       totalPurchase: totalPurchase || 0,
       balance: balance || 0,
+      createdBy: req.user._id,
     };
 
     // Create new customer
     const customer = await Customer.create(customerData);
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "customer_created",
+      title: "New Customer Created",
+      message: `Customer ${customer.name} created by ${req.user.name}`,
+      entityType: "customer",
+      entityId: customer._id,
+      metadata: { customerCode: customer.code, customerEmail: customer.email },
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,

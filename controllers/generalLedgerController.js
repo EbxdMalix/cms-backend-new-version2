@@ -54,7 +54,8 @@ const getAccountLedger = async (req, res) => {
     const ledger = await AccountingService.getAccountLedger(
       accountCode,
       startDate,
-      endDate
+      endDate,
+      req.tenantId
     );
 
     res.status(200).json({
@@ -82,7 +83,8 @@ const getAccountBalance = async (req, res) => {
 
     const balance = await AccountingService.getAccountBalance(
       accountCode,
-      asOfDate ? new Date(asOfDate) : new Date()
+      asOfDate ? new Date(asOfDate) : new Date(),
+      req.tenantId
     );
 
     res.status(200).json({
@@ -108,7 +110,8 @@ const getTrialBalance = async (req, res) => {
     const { asOfDate } = queryParams;
 
     const trialBalance = await AccountingService.getTrialBalance(
-      asOfDate ? new Date(asOfDate) : new Date()
+      asOfDate ? new Date(asOfDate) : new Date(),
+      req.tenantId
     );
 
     res.status(200).json({
@@ -133,7 +136,8 @@ const getBalanceSheet = async (req, res) => {
     const { asOfDate } = req.query;
 
     const balanceSheet = await AccountingService.getBalanceSheet(
-      asOfDate ? new Date(asOfDate) : new Date()
+      asOfDate ? new Date(asOfDate) : new Date(),
+      req.tenantId
     );
 
     res.status(200).json({
@@ -159,7 +163,8 @@ const getProfitAndLoss = async (req, res) => {
 
     const profitAndLoss = await AccountingService.getProfitAndLoss(
       startDate ? new Date(startDate) : null,
-      endDate ? new Date(endDate) : new Date()
+      endDate ? new Date(endDate) : new Date(),
+      req.tenantId
     );
 
     res.status(200).json({

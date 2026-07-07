@@ -7,6 +7,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    clerkId: {
+      type: String,
+      default: null,
+      sparse: true,
+      unique: true,
+    },
     name: {
       type: String,
       required: [true, "Name is required"],
@@ -24,7 +30,7 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: false,
       minlength: [6, "Password must be at least 6 characters"],
       select: false, // Don't include password in queries by default
     },
@@ -51,6 +57,12 @@ const userSchema = new mongoose.Schema(
         cashPayment: { type: Boolean, default: false },
         bankPayment: { type: Boolean, default: false },
         reports: { type: Boolean, default: false },
+        accounting: { type: Boolean, default: false },
+        finance: { type: Boolean, default: false },
+        crm: { type: Boolean, default: false },
+        hr: { type: Boolean, default: false },
+        documents: { type: Boolean, default: false },
+        analytics: { type: Boolean, default: false },
       },
       default: null,
     },
@@ -65,7 +77,7 @@ userSchema.index({ email: 1 }, { unique: true });
 
 // Hash password before saving
 userSchema.pre("save", async function () {
-  if (!this.isModified("password")) {
+  if (!this.isModified("password") || !this.password) {
     return;
   }
   const salt = await bcrypt.genSalt(10);
@@ -74,6 +86,7 @@ userSchema.pre("save", async function () {
 
 // Method to compare passwords
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

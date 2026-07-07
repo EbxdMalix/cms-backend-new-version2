@@ -16,6 +16,9 @@ const {
 
 // All routes are protected and permission-scoped
 router.use(protect);
+const { sensitiveLimiter } = require("../middleware/rateLimiters");
+router.use(sensitiveLimiter);
+
 const PERMISSIONS = require("../constants/permissions");
 const checkPermission = require("../middleware/checkPermission");
 router.use(checkPermission(PERMISSIONS.REPORTS));

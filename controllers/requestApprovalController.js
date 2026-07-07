@@ -9,7 +9,7 @@ const Plot = require("../models/Plot");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
 const AuditLog = require("../models/AuditLog");
-const { notifyAdmins } = require("./notificationController");
+const NotificationService = require("../services/notificationService");
 
 // @desc    Create a new request for any entity creation/editing
 // @route   POST /api/request-approvals
@@ -176,7 +176,8 @@ exports.createRequest = async (req, res) => {
       delete_user: "User Deletion",
     };
 
-    await notifyAdmins({
+    NotificationService.notifyAdmins({
+      tenantId: req.tenantId,
       sender: req.user.id,
       type: "request_created",
       title: `New ${requestTypeLabels[requestType]} Request`,
@@ -191,7 +192,7 @@ exports.createRequest = async (req, res) => {
         requestType,
         requestId: request._id,
       },
-    });
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,
@@ -340,6 +341,7 @@ exports.approveRequest = async (req, res) => {
 
         entity = await Project.create({
           ...projectData,
+          tenantId: req.tenantId,
           createdBy: request.userId._id,
         });
         await entity.populate("createdBy", "name email role");
@@ -727,8 +729,8 @@ exports.approveRequest = async (req, res) => {
       delete_user: "User Deletion",
     };
 
-    const Notification = require("../models/Notification");
-    await Notification.create({
+    NotificationService.notifyUser({
+      tenantId: req.tenantId,
       recipient: request.userId._id,
       sender: req.user.id,
       type: "request_approved",
@@ -743,7 +745,8 @@ exports.approveRequest = async (req, res) => {
         requestId: request._id,
         adminResponse: request.adminResponse,
       },
-    });
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(200).json({
       success: true,
@@ -862,8 +865,8 @@ exports.rejectRequest = async (req, res) => {
       delete_user: "User Deletion",
     };
 
-    const Notification = require("../models/Notification");
-    await Notification.create({
+    NotificationService.notifyUser({
+      tenantId: req.tenantId,
       recipient: request.userId._id,
       sender: req.user.id,
       type: "request_rejected",
@@ -880,7 +883,8 @@ exports.rejectRequest = async (req, res) => {
         requestId: request._id,
         adminResponse: adminResponse,
       },
-    });
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(200).json({
       success: true,

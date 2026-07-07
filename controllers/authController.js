@@ -3,13 +3,16 @@ const jwt = require("jsonwebtoken");
 const { blacklistToken } = require("../middleware/authMiddleware");
 
 // Generate JWT Token with enhanced security
-const generateToken = (userId, tenantId = null) => {
+const generateToken = (userId, tenantId = null, role = null, customPermissions = null, permissionVersion = 1) => {
   const payload = {
     id: userId,
     iat: Math.floor(Date.now() / 1000), // Issued at timestamp
   };
   if (tenantId) {
     payload.tenantId = tenantId;
+    payload.role = role;
+    payload.customPermissions = customPermissions;
+    payload.permissionVersion = permissionVersion;
   }
   return jwt.sign(
     payload,
@@ -26,7 +29,7 @@ const generateToken = (userId, tenantId = null) => {
 // @access  Public (but should be restricted in production)
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role, tenantId } = req.body;
+    const { name, email, password, role } = req.body;
 
     // Validation
     if (!name || !email || !password) {
@@ -45,10 +48,8 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Get or use provided tenantId
-    let userTenantId = tenantId;
-
-    // If no tenantId provided, try to get the first tenant (for fresh start)
+    // Derive tenantId from auth context if authenticated, otherwise bootstrap with first tenant
+    let userTenantId = req.tenantId;
     if (!userTenantId) {
       const Tenant = require("../models/Tenant");
       const tenant = await Tenant.findOne();
@@ -122,8 +123,17 @@ exports.login = async (req, res) => {
     }
 
     // Find user by email only - system will automatically find their tenant
+    const { logAudit } = require("../utils/audit");
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
+      await logAudit({
+        tenantId: null,
+        userId: null,
+        action: "login",
+        entityType: "User",
+        entityId: null,
+        metadata: { action: "LOGIN_FAILED", desc: `Failed login attempt: user with email ${email} not found` }
+      });
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
@@ -132,6 +142,14 @@ exports.login = async (req, res) => {
 
     // Check if user is active
     if (!user.isActive) {
+      await logAudit({
+        tenantId: null,
+        userId: user._id,
+        action: "login",
+        entityType: "User",
+        entityId: user._id,
+        metadata: { action: "LOGIN_FAILED", desc: `Failed login attempt: account for ${email} is deactivated` }
+      });
       return res.status(401).json({
         success: false,
         message: "Account is deactivated",
@@ -141,6 +159,14 @@ exports.login = async (req, res) => {
     // Verify password
     const isPasswordMatch = await user.comparePassword(password);
     if (!isPasswordMatch) {
+      await logAudit({
+        tenantId: null,
+        userId: user._id,
+        action: "login",
+        entityType: "User",
+        entityId: user._id,
+        metadata: { action: "LOGIN_FAILED", desc: `Failed login attempt: password mismatch for ${email}` }
+      });
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
@@ -167,6 +193,14 @@ exports.login = async (req, res) => {
     let isAutoRouted = false;
 
     if (portalAccesses.length === 0) {
+      await logAudit({
+        tenantId: null,
+        userId: user._id,
+        action: "login",
+        entityType: "User",
+        entityId: user._id,
+        metadata: { action: "LOGIN_FAILED", desc: `Failed login attempt: no active memberships for ${email}` }
+      });
       return res.status(403).json({
         success: false,
         message: "Access denied. No active memberships configured for this account.",
@@ -204,7 +238,14 @@ exports.login = async (req, res) => {
     }
 
     // Generate token containing the active tenantId
-    const token = generateToken(user._id, activeTenantId);
+    const activeAccess = activeTenantId && portalAccesses.find(acc => acc.tenantId === activeTenantId);
+    const token = generateToken(
+      user._id,
+      activeTenantId,
+      activeRole,
+      activePermissions,
+      activeAccess ? (activeAccess.permissionVersion || 1) : 1
+    );
 
     // Get active tenant info
     let tenant = null;
@@ -228,6 +269,15 @@ exports.login = async (req, res) => {
         });
       }
     }
+
+    await logAudit({
+      tenantId: activeTenantId,
+      userId: user._id,
+      action: "login",
+      entityType: "User",
+      entityId: user._id,
+      metadata: { action: "LOGIN_SUCCESS", desc: `User logged in successfully` }
+    });
 
     console.log("Login successful for:", email);
     res.status(200).json({
@@ -403,8 +453,26 @@ exports.switchPortal = async (req, res) => {
       });
     }
 
+    const { logAudit } = require("../utils/audit");
+    await logAudit({
+      tenantId: tenantId,
+      userId: req.user._id,
+      action: "update",
+      entityType: "Session",
+      entityId: req.user._id,
+      before: { activeTenantId: req.tenantId },
+      after: { activeTenantId: tenantId },
+      metadata: { action: "TENANT_SWITCH", desc: `User switched active workspace from ${req.tenantId || "None"} to ${tenantId}` }
+    });
+
     // Generate new token containing the new active tenantId
-    const token = generateToken(req.user.id, tenantId);
+    const token = generateToken(
+      req.user.id,
+      tenantId,
+      access.role,
+      access.customPermissions,
+      access.permissionVersion || 1
+    );
 
     res.status(200).json({
       success: true,

@@ -1,4 +1,5 @@
 const Project = require("../models/Project");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Create new project
 // @route   POST /api/projects
@@ -105,6 +106,18 @@ exports.createProject = async (req, res) => {
 
     // Populate references
     await project.populate("createdBy", "name email role");
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "project_created",
+      title: "New Project Created",
+      message: `Project "${project.name}" created by ${req.user.name}`,
+      entityType: "project",
+      entityId: project._id,
+      metadata: { projectCode: project.code },
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,

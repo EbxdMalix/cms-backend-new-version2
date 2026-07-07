@@ -1,4 +1,4 @@
-const jwt = require("jsonwebtoken");
+const { getAuth, clerkClient } = require("@clerk/express");
 const User = require("../models/User");
 const BlacklistedToken = require("../models/BlacklistedToken");
 
@@ -13,148 +13,188 @@ exports.blacklistToken = async (token) => {
   }
 };
 
-// Check if token is blacklisted
-const isTokenBlacklisted = async (token) => {
-  try {
-    const exists = await BlacklistedToken.exists({ token });
-    return !!exists;
-  } catch (err) {
-    console.error("Error checking token blacklist status:", err);
-    return false;
-  }
-};
-
-// Protect routes - verify JWT token
+// Protect routes - verify Clerk session token and load user context
 exports.protect = async (req, res, next) => {
   try {
-    let token;
+    const auth = getAuth(req);
+    const userId = auth.userId;
 
-    // Check for token in Authorization header
-    if (
-      req.headers.authorization &&
-      req.headers.authorization.startsWith("Bearer")
-    ) {
-      token = req.headers.authorization.split(" ")[1];
-    }
-
-    if (!token) {
+    if (!userId) {
       return res.status(401).json({
         success: false,
         message: "Not authorized to access this route",
       });
     }
 
-    // Check if token is blacklisted
-    if (await isTokenBlacklisted(token)) {
+    // Get user from DB by clerkId
+    let user = await User.findOne({ clerkId: userId });
+
+    // Fallback: if user is not synced with clerkId, try to find by email from Clerk
+    if (!user) {
+      try {
+        const clerkUser = await clerkClient.users.getUser(userId);
+        const email = clerkUser.emailAddresses?.[0]?.emailAddress;
+
+        if (email) {
+          user = await User.findOne({ email: email.toLowerCase() });
+          if (user) {
+            user.clerkId = userId;
+            await user.save();
+          }
+        }
+      } catch (clerkErr) {
+        console.error("Error fetching user details from Clerk:", clerkErr);
+      }
+    }
+
+    if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Token has been revoked",
+        message: "Not authorized - User profile not found in system",
       });
     }
 
-    try {
-      // Verify token with additional security checks
-      const decoded = jwt.verify(token, process.env.JWT_SECRET, {
-        algorithms: ["HS256"], // Explicitly specify allowed algorithms
-        clockTolerance: 0, // No tolerance for clock skew
+    if (!user.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: "Account is deactivated",
       });
+    }
 
-      // Check token expiration
-      if (decoded.exp && Date.now() >= decoded.exp * 1000) {
-        return res.status(401).json({
-          success: false,
-          message: "Token has expired",
-        });
-      }
+    req.user = user;
 
-      // Get user from token
-      req.user = await User.findById(decoded.id).select("-password");
+    // Resolve tenant context via X-Tenant-ID header
+    const headerTenantId = req.headers["x-tenant-id"];
+    
+    // Define tenant-agnostic paths that do not require x-tenant-id
+    const agnosticPaths = ["/api/auth/me", "/api/auth/clerk-sync", "/api/auth/switch-portal", "/api/auth/set-default", "/api/auth/logout", "/api/auth/invitation"];
+    const isAgnostic = agnosticPaths.some(path => req.originalUrl.startsWith(path));
 
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          message: "User not found",
-        });
-      }
+    const jwt = require("jsonwebtoken");
+    const { resolveTenantContext } = require("../utils/tenantContext");
 
-      // Extract active tenantId from JWT or fallback to portal membership
-      if (decoded.tenantId) {
-        const Tenant = require("../models/Tenant");
-        const tenantInfo = await Tenant.findOne({ tenantId: decoded.tenantId, isActive: true });
-        if (!tenantInfo) {
-          return res.status(403).json({
-            success: false,
-            message: "Access denied. This workspace is deactivated or does not exist.",
-          });
+    // Check for pre-resolved session JWT context inside headers (Authorization Bearer or custom x-context-token)
+    const contextToken = req.headers["x-context-token"] || (req.headers["authorization"]?.split(" ")[1]);
+
+    if (headerTenantId) {
+      let resolvedContext = null;
+      let cacheMiss = true;
+
+      // Try resolving cached context from local JWT signature and verify version matches database
+      if (contextToken) {
+        try {
+          const decoded = jwt.verify(contextToken, process.env.JWT_SECRET);
+          if (decoded && decoded.tenantId === headerTenantId) {
+            // Verify DB version matches cached context token version
+            const UserPortalAccess = require("../models/UserPortalAccess");
+            const dbAccess = await UserPortalAccess.findOne({
+              userId: req.user._id,
+              tenantId: headerTenantId,
+              isActive: true,
+            });
+            
+            if (dbAccess && (dbAccess.permissionVersion || 1) === (decoded.permissionVersion || 1)) {
+              resolvedContext = decoded;
+              cacheMiss = false;
+            }
+          }
+        } catch (jwtErr) {
+          // Token expired or invalid -> Fall back to MongoDB query validation
         }
+      }
 
-        const UserPortalAccess = require("../models/UserPortalAccess");
-        const access = await UserPortalAccess.findOne({
-          userId: req.user._id,
-          tenantId: decoded.tenantId,
-          isActive: true,
-        });
-
-        if (access) {
-          // Dynamically overload active tenant, role, and customPermissions
-          req.tenantId = access.tenantId;
-          req.user.role = access.role;
-          req.user.customPermissions = access.customPermissions;
-        } else {
+      // If cache missed -> query MongoDB via resolveTenantContext
+      if (!resolvedContext) {
+        try {
+          resolvedContext = await resolveTenantContext(req.user._id, headerTenantId);
+          cacheMiss = true;
+        } catch (err) {
+          if (err.message === "WORKSPACE_INACTIVE") {
+            return res.status(403).json({
+              success: false,
+              message: "Access denied. This workspace is deactivated or does not exist.",
+            });
+          }
           return res.status(403).json({
             success: false,
             message: "Access denied. No active membership for this portal.",
           });
         }
-      } else {
-        // Fallback to first available active portal membership
-        const UserPortalAccess = require("../models/UserPortalAccess");
-        const Tenant = require("../models/Tenant");
-        
-        const activeMemberships = await UserPortalAccess.find({
-          userId: req.user._id,
-          isActive: true,
-        });
+      }
 
-        let validAccess = null;
-        for (const membership of activeMemberships) {
-          const tenantInfo = await Tenant.findOne({ tenantId: membership.tenantId, isActive: true });
-          if (tenantInfo) {
-            validAccess = membership;
-            break;
+      if (resolvedContext) {
+        req.tenantId = resolvedContext.tenantId;
+        req.user.role = resolvedContext.role;
+        req.user.customPermissions = resolvedContext.customPermissions;
+        req.tenantContext = resolvedContext;
+
+        // If cache missed (version mismatch or token refreshed/re-resolved from database),
+        // sign a new Context JWT and send it via the X-Refresh-Token header
+        if (cacheMiss) {
+          try {
+            const newToken = jwt.sign(
+              {
+                id: req.user._id,
+                tenantId: resolvedContext.tenantId,
+                role: resolvedContext.role,
+                customPermissions: resolvedContext.customPermissions,
+                permissionVersion: resolvedContext.permissionVersion || 1,
+              },
+              process.env.JWT_SECRET,
+              {
+                expiresIn: "7d",
+                algorithm: "HS256"
+              }
+            );
+            res.setHeader("x-refresh-token", newToken);
+            res.setHeader("Access-Control-Expose-Headers", "x-refresh-token");
+          } catch (signErr) {
+            console.error("Error signing refreshed context token:", signErr);
           }
         }
+      }
+    } else {
+      // If header is missing and the route is NOT agnostic -> REJECT
+      if (!isAgnostic) {
+        return res.status(400).json({
+          success: false,
+          code: "MISSING_TENANT_HEADER",
+          message: "Multi-tenant context header (x-tenant-id) is missing. Request rejected for isolation security.",
+        });
+      }
 
-        if (validAccess) {
-          req.tenantId = validAccess.tenantId;
-          req.user.role = validAccess.role;
-          req.user.customPermissions = validAccess.customPermissions;
-        } else {
+      // OPTIMIZED DEFAULT RESOLUTION STRATEGY (For Agnostic Routes only)
+      const UserPortalAccess = require("../models/UserPortalAccess");
+      
+      const activeMemberships = await UserPortalAccess.find({
+        userId: req.user._id,
+        isActive: true,
+      }).sort({ isDefaultPortal: -1, lastAccessedAt: -1 }); // Priority: Default first, then last accessed
+
+      if (activeMemberships.length > 0) {
+        try {
+          const context = await resolveTenantContext(req.user._id, activeMemberships[0].tenantId);
+          if (context) {
+            req.tenantId = context.tenantId;
+            req.user.role = context.role;
+            req.user.customPermissions = context.customPermissions;
+            req.tenantContext = context;
+          }
+        } catch (err) {
           req.tenantId = null;
         }
+      } else {
+        req.tenantId = null;
       }
-
-      // Store token for potential blacklisting
-      req.token = token;
-
-      next();
-    } catch (error) {
-      if (error.name === "JsonWebTokenError") {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid token",
-        });
-      } else if (error.name === "TokenExpiredError") {
-        return res.status(401).json({
-          success: false,
-          message: "Token has expired",
-        });
-      }
-      return res.status(401).json({
-        success: false,
-        message: "Not authorized to access this route",
-      });
     }
+
+    const tenantLocalStorage = require("../utils/tenantStorage");
+    const store = tenantLocalStorage.getStore();
+    if (store && req.tenantId) {
+      store.set("tenantId", req.tenantId);
+    }
+
+    next();
   } catch (error) {
     console.error("Auth middleware error:", error);
     res.status(500).json({

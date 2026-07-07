@@ -1,9 +1,8 @@
 const SalesInvoice = require("../models/SalesInvoice");
 const Customer = require("../models/Customer");
-const User = require("../models/User");
-const Project = require("../models/Project");
-const Item = require("../models/Item");
 const Plot = require("../models/Plot");
+const Item = require("../models/Item");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Get all sales invoices
 // @route   GET /api/sales-invoices
@@ -193,6 +192,7 @@ exports.createSalesInvoice = async (req, res) => {
         // Validate plot stock
         const plotRecord = await Plot.findOne({
           plotNumber: item.itemCode.toUpperCase(),
+          tenantId: req.tenantId,
         });
         if (plotRecord) {
           // For plots, check if it's already Sold
@@ -253,6 +253,7 @@ exports.createSalesInvoice = async (req, res) => {
         // Validate inventory item stock
         const itemRecord = await Item.findOne({
           itemCode: item.itemCode.toUpperCase(),
+          tenantId: req.tenantId,
         });
         if (itemRecord) {
           const availableStock = itemRecord.currentStock || 0;
@@ -290,7 +291,7 @@ exports.createSalesInvoice = async (req, res) => {
       for (const item of salesInvoice.items) {
         if (item.itemType === "Plot") {
           // Update plot stock
-          const plotRecord = await Plot.findOne({ plotNumber: item.itemCode }).session(session);
+          const plotRecord = await Plot.findOne({ plotNumber: item.itemCode, tenantId: req.tenantId }).session(session);
           if (plotRecord) {
             // Increment sold stock
             plotRecord.soldStock = (plotRecord.soldStock || 0) + item.quantity;
@@ -314,7 +315,7 @@ exports.createSalesInvoice = async (req, res) => {
           }
         } else {
           // Update inventory item stock
-          const itemRecord = await Item.findOne({ itemCode: item.itemCode }).session(session);
+          const itemRecord = await Item.findOne({ itemCode: item.itemCode, tenantId: req.tenantId }).session(session);
           if (itemRecord) {
             await Item.findByIdAndUpdate(itemRecord._id, {
               $inc: { currentStock: -item.quantity },
@@ -339,6 +340,17 @@ exports.createSalesInvoice = async (req, res) => {
     await salesInvoice.populate("customer", "name code email phone address");
     await salesInvoice.populate("employeeReference", "name email");
     await salesInvoice.populate("project", "name code");
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "sales_invoice_created",
+      title: "New Sales Invoice",
+      message: `Sales invoice ${salesInvoice.serialNo} created for ${salesInvoice.customerName} by ${req.user.name}`,
+      entityType: "sales_invoice",
+      entityId: salesInvoice._id,
+      metadata: { serialNo: salesInvoice.serialNo, netTotal: salesInvoice.netTotal },
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,
@@ -439,6 +451,7 @@ exports.updateSalesInvoice = async (req, res) => {
         if (oldItem.itemType === "Plot") {
           const plotRecord = await Plot.findOne({
             plotNumber: oldItem.itemCode,
+            tenantId: req.tenantId,
           });
           if (plotRecord) {
             // Restore sold stock
@@ -458,7 +471,7 @@ exports.updateSalesInvoice = async (req, res) => {
             await plotRecord.save();
           }
         } else {
-          const itemRecord = await Item.findOne({ itemCode: oldItem.itemCode });
+          const itemRecord = await Item.findOne({ itemCode: oldItem.itemCode, tenantId: req.tenantId });
           if (itemRecord) {
             await Item.findByIdAndUpdate(itemRecord._id, {
               $inc: { currentStock: oldItem.quantity },
@@ -473,6 +486,7 @@ exports.updateSalesInvoice = async (req, res) => {
         if (item.itemType === "Plot") {
           const plotRecord = await Plot.findOne({
             plotNumber: item.itemCode.toUpperCase(),
+            tenantId: req.tenantId,
           });
           if (plotRecord) {
             // For plots, check if it's already Sold AND has no available stock
@@ -535,6 +549,7 @@ exports.updateSalesInvoice = async (req, res) => {
         } else {
           const itemRecord = await Item.findOne({
             itemCode: item.itemCode.toUpperCase(),
+            tenantId: req.tenantId,
           });
           if (itemRecord) {
             const availableStock = itemRecord.currentStock || 0;
@@ -556,12 +571,13 @@ exports.updateSalesInvoice = async (req, res) => {
         // Restore old stock state
         for (const oldItem of oldItems) {
           if (oldItem.itemType === "Plot") {
-            const plotRecord = await Plot.findOne({
-              plotNumber: oldItem.itemCode,
-            });
-            if (plotRecord) {
-              // Restore sold stock
-              plotRecord.soldStock =
+          const plotRecord = await Plot.findOne({
+            plotNumber: oldItem.itemCode,
+            tenantId: req.tenantId,
+          });
+          if (plotRecord) {
+            // Restore sold stock
+            plotRecord.soldStock =
                 (plotRecord.soldStock || 0) + oldItem.quantity;
               plotRecord.availableStock =
                 plotRecord.totalStock - plotRecord.soldStock;
@@ -575,14 +591,15 @@ exports.updateSalesInvoice = async (req, res) => {
               await plotRecord.save();
             }
           } else {
-            const itemRecord = await Item.findOne({
-              itemCode: oldItem.itemCode,
+          const itemRecord = await Item.findOne({
+            itemCode: oldItem.itemCode,
+            tenantId: req.tenantId,
+          });
+          if (itemRecord) {
+            await Item.findByIdAndUpdate(itemRecord._id, {
+              $inc: { currentStock: -oldItem.quantity },
             });
-            if (itemRecord) {
-              await Item.findByIdAndUpdate(itemRecord._id, {
-                $inc: { currentStock: -oldItem.quantity },
-              });
-            }
+          }
           }
         }
 
@@ -598,6 +615,7 @@ exports.updateSalesInvoice = async (req, res) => {
         if (item.itemType === "Plot") {
           const plotRecord = await Plot.findOne({
             plotNumber: item.itemCode.toUpperCase(),
+            tenantId: req.tenantId,
           });
           if (plotRecord) {
             // Increment sold stock
@@ -626,6 +644,7 @@ exports.updateSalesInvoice = async (req, res) => {
         } else {
           const itemRecord = await Item.findOne({
             itemCode: item.itemCode.toUpperCase(),
+            tenantId: req.tenantId,
           });
           if (itemRecord) {
             await Item.findByIdAndUpdate(itemRecord._id, {
@@ -746,7 +765,7 @@ exports.deleteSalesInvoice = async (req, res) => {
     // Restore stock for all items in the invoice (reverse the sale)
     for (const item of salesInvoice.items) {
       if (item.itemType === "Plot") {
-        const plotRecord = await Plot.findOne({ plotNumber: item.itemCode });
+        const plotRecord = await Plot.findOne({ plotNumber: item.itemCode, tenantId: req.tenantId });
         if (plotRecord) {
           // Decrement sold stock
           plotRecord.soldStock = Math.max(
@@ -775,7 +794,7 @@ exports.deleteSalesInvoice = async (req, res) => {
           await plotRecord.save();
         }
       } else {
-        const itemRecord = await Item.findOne({ itemCode: item.itemCode });
+        const itemRecord = await Item.findOne({ itemCode: item.itemCode, tenantId: req.tenantId });
         if (itemRecord) {
           await Item.findByIdAndUpdate(itemRecord._id, {
             $inc: { currentStock: item.quantity },
@@ -792,7 +811,10 @@ exports.deleteSalesInvoice = async (req, res) => {
       },
     });
 
-    await SalesInvoice.findByIdAndDelete(req.params.id);
+    await SalesInvoice.findOneAndDelete({
+      _id: req.params.id,
+      tenantId: req.tenantId,
+    });
 
     res.status(200).json({
       success: true,
@@ -815,6 +837,7 @@ exports.getSalesInvoicesByCustomer = async (req, res) => {
   try {
     const salesInvoices = await SalesInvoice.find({
       customer: req.params.customerId,
+      tenantId: req.tenantId,
     })
       .populate("customer", "name code email phone address")
       .populate("project", "name code")
@@ -842,6 +865,7 @@ exports.getSalesInvoicesByProject = async (req, res) => {
   try {
     const salesInvoices = await SalesInvoice.find({
       project: req.params.projectId,
+      tenantId: req.tenantId,
     })
       .populate("customer", "name code email phone address")
       .populate("project", "name code")
@@ -877,6 +901,7 @@ exports.getSalesInvoicesByDateRange = async (req, res) => {
     }
 
     const salesInvoices = await SalesInvoice.find({
+      tenantId: req.tenantId,
       date: {
         $gte: new Date(startDate),
         $lte: new Date(endDate),

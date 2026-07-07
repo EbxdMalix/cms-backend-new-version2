@@ -1,5 +1,6 @@
 const BankPayment = require("../models/BankPayment");
 const ChartOfAccount = require("../models/ChartOfAccount");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Get all bank payments
 // @route   GET /api/bankpayments
@@ -135,6 +136,18 @@ const createBankPayment = async (req, res) => {
       { path: "employeeRef", select: "name email" },
       { path: "createdBy", select: "name email" },
     ]);
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "bank_payment_created",
+      title: "New Bank Payment",
+      message: `Bank payment ${payment.serialNo} created by ${req.user.name}`,
+      entityType: "bank_payment",
+      entityId: payment._id,
+      metadata: { serialNo: payment.serialNo, totalAmount: payment.totalAmount },
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,

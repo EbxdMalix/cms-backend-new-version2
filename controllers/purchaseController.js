@@ -1,5 +1,6 @@
 const Purchase = require("../models/Purchase");
 const Item = require("../models/Item");
+const { notifyAdmins } = require("./notificationController");
 const User = require("../models/User");
 
 // @desc    Get all purchases
@@ -181,7 +182,7 @@ exports.createPurchase = async (req, res) => {
       if (vendorCode) {
         const Supplier = require("../models/Supplier");
         await Supplier.findOneAndUpdate(
-          { code: vendorCode },
+          { code: vendorCode, tenantId: req.tenantId },
           {
             $inc: {
               totalPurchases: purchaseData.netAmount,
@@ -196,6 +197,18 @@ exports.createPurchase = async (req, res) => {
     // Populate references before sending response
     await purchase.populate("item", "name itemCode measurement");
     await purchase.populate("employeeReference", "name email");
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "purchase_entry_created",
+      title: "New Purchase Entry",
+      message: `Purchase ${purchase.purchaseOrderNo} created for ${purchase.vendorName} by ${req.user.name}`,
+      entityType: "purchase_entry",
+      entityId: purchase._id,
+      metadata: { purchaseOrderNo: purchase.purchaseOrderNo, netAmount: purchase.netAmount },
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,
@@ -353,7 +366,10 @@ exports.deletePurchase = async (req, res) => {
       $inc: { currentStock: -purchase.quantity },
     });
 
-    await Purchase.findByIdAndDelete(req.params.id);
+    await Purchase.findOneAndDelete({
+      _id: req.params.id,
+      tenantId: req.tenantId,
+    });
 
     res.status(200).json({
       success: true,
@@ -375,6 +391,7 @@ exports.deletePurchase = async (req, res) => {
 exports.getPurchasesByVendor = async (req, res) => {
   try {
     const purchases = await Purchase.find({
+      tenantId: req.tenantId,
       vendorName: new RegExp(req.params.vendorName, "i"),
     })
       .populate("item", "name itemCode measurement")
@@ -410,6 +427,7 @@ exports.getPurchasesByDateRange = async (req, res) => {
     }
 
     const purchases = await Purchase.find({
+      tenantId: req.tenantId,
       date: {
         $gte: new Date(startDate),
         $lte: new Date(endDate),

@@ -11,7 +11,7 @@ if (process.env.VERCEL !== "1") {
 
 let isConnected = false;
 
-// Global insert logger plugin
+// Global Mongoose plugins
 mongoose.plugin((schema) => {
   schema.post("save", function (doc) {
     console.log(JSON.stringify({
@@ -23,6 +23,21 @@ mongoose.plugin((schema) => {
       timestamp: new Date().toISOString()
     }));
   });
+
+  // Query-level multi-tenant isolation boundary plugin
+  // Automatically injects the active tenantId into find and findOne queries
+  if (schema.paths.tenantId) {
+    schema.pre(/^find/, function () {
+      const tenantLocalStorage = require("../utils/tenantStorage");
+      const store = tenantLocalStorage.getStore();
+      const tenantId = store ? store.get("tenantId") : null;
+      const filter = this.getFilter();
+      
+      if (tenantId && !filter.tenantId) {
+        this.where({ tenantId });
+      }
+    });
+  }
 });
 
 const connectDB = async () => {

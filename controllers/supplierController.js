@@ -1,4 +1,5 @@
 const Supplier = require("../models/Supplier");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Get all suppliers
 // @route   GET /api/suppliers
@@ -94,7 +95,19 @@ exports.createSupplier = async (req, res) => {
       city,
       country,
       status,
+      createdBy: req.user._id,
     });
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "supplier_created",
+      title: "New Supplier Created",
+      message: `Supplier ${supplier.name} created by ${req.user.name}`,
+      entityType: "supplier",
+      entityId: supplier._id,
+      metadata: { supplierCode: supplier.code, supplierCompany: supplier.company },
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,

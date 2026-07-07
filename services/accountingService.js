@@ -583,40 +583,41 @@ class AccountingService {
   /**
    * Get account balance
    */
-  static async getAccountBalance(accountCode, asOfDate = new Date()) {
-    return await GeneralLedger.getAccountBalance(accountCode, asOfDate);
+  static async getAccountBalance(accountCode, asOfDate = new Date(), tenantId = null) {
+    return await GeneralLedger.getAccountBalance(accountCode, asOfDate, tenantId);
   }
 
   /**
    * Get account ledger
    */
-  static async getAccountLedger(accountCode, startDate, endDate) {
+  static async getAccountLedger(accountCode, startDate, endDate, tenantId = null) {
     return await GeneralLedger.getAccountLedger(
       accountCode,
       startDate,
-      endDate
+      endDate,
+      tenantId
     );
   }
 
   /**
    * Get trial balance
    */
-  static async getTrialBalance(asOfDate = new Date()) {
-    return await GeneralLedger.getTrialBalance(asOfDate);
+  static async getTrialBalance(asOfDate = new Date(), tenantId = null) {
+    return await GeneralLedger.getTrialBalance(asOfDate, tenantId);
   }
 
   /**
    * Get balance sheet
    */
-  static async getBalanceSheet(asOfDate = new Date()) {
-    return await GeneralLedger.getBalanceSheet(asOfDate);
+  static async getBalanceSheet(asOfDate = new Date(), tenantId = null) {
+    return await GeneralLedger.getBalanceSheet(asOfDate, tenantId);
   }
 
   /**
    * Get profit & loss statement
    */
-  static async getProfitAndLoss(startDate, endDate) {
-    return await GeneralLedger.getProfitAndLoss(startDate, endDate);
+  static async getProfitAndLoss(startDate, endDate, tenantId = null) {
+    return await GeneralLedger.getProfitAndLoss(startDate, endDate, tenantId);
   }
 
   /**

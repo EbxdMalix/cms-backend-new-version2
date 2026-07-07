@@ -4,11 +4,13 @@ const {
   getAllUsers,
   getUserById,
   createUser,
+  resendInvitation,
   updateUser,
   deleteUser,
   toggleUserStatus,
 } = require("../controllers/userController");
-const { protect, admin } = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
+const { inviteDispatchLimiter } = require("../middleware/rateLimiters");
 
 // @route   GET /api/users
 // @desc    Get all users (for dropdowns - all authenticated users can access)
@@ -26,7 +28,11 @@ router.get("/:id", getUserById);
 
 // @route   POST /api/users
 // @desc    Create new user
-router.post("/", createUser);
+router.post("/", inviteDispatchLimiter, createUser);
+
+// @route   POST /api/users/invitation/:id/resend
+// @desc    Resend invitation
+router.post("/invitation/:id/resend", inviteDispatchLimiter, resendInvitation);
 
 // @route   PUT /api/users/:id
 // @desc    Update user

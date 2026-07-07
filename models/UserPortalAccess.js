@@ -36,6 +36,12 @@ const userPortalAccessSchema = new mongoose.Schema(
         cashPayment: { type: Boolean, default: false },
         bankPayment: { type: Boolean, default: false },
         reports: { type: Boolean, default: false },
+        accounting: { type: Boolean, default: false },
+        finance: { type: Boolean, default: false },
+        crm: { type: Boolean, default: false },
+        hr: { type: Boolean, default: false },
+        documents: { type: Boolean, default: false },
+        analytics: { type: Boolean, default: false },
       },
       default: null,
     },
@@ -46,6 +52,10 @@ const userPortalAccessSchema = new mongoose.Schema(
     lastAccessedAt: {
       type: Date,
       default: null,
+    },
+    permissionVersion: {
+      type: Number,
+      default: 1,
     },
   },
   {

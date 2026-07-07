@@ -1,5 +1,6 @@
 const Plot = require("../models/Plot");
 const Project = require("../models/Project");
+const { notifyAdmins } = require("./notificationController");
 const Customer = require("../models/Customer");
 
 // @desc    Get all plots
@@ -151,6 +152,17 @@ exports.createPlot = async (req, res) => {
     // Populate references
     await plot.populate("project", "name code");
     await plot.populate("createdBy", "name email");
+
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "plot_created",
+      title: "New Plot Created",
+      message: `Plot ${plot.plotNumber} created by ${req.user.name}`,
+      entityType: "plot",
+      entityId: plot._id,
+      metadata: { plotNumber: plot.plotNumber, plotType: plot.plotType },
+    }).catch(err => console.error("Notification error:", err));
 
     res.status(201).json({
       success: true,

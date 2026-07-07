@@ -116,6 +116,7 @@ exports.createItem = async (req, res) => {
       quantity: quantity || 0,
       sellingPrice: sellingPrice || 0,
       minStockLevel: minStockLevel || 0,
+      createdBy: req.user._id,
     };
 
     // Only set currentStock if explicitly provided, otherwise let pre-save hook handle it

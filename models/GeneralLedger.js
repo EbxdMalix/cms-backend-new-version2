@@ -140,16 +140,18 @@ GeneralLedgerSchema.pre("save", function () {
 // Static method to get account balance at a specific date
 GeneralLedgerSchema.statics.getAccountBalance = async function (
   accountCode,
-  asOfDate = new Date()
+  asOfDate = new Date(),
+  tenantId = null
 ) {
+  const match = {
+    accountCode: accountCode,
+    date: { $lte: new Date(asOfDate) },
+    status: "Active",
+  };
+  if (tenantId) match.tenantId = tenantId;
+
   const result = await this.aggregate([
-    {
-      $match: {
-        accountCode: accountCode,
-        date: { $lte: new Date(asOfDate) },
-        status: "Active",
-      },
-    },
+    { $match: match },
     {
       $group: {
         _id: "$accountCode",
@@ -180,12 +182,14 @@ GeneralLedgerSchema.statics.getAccountBalance = async function (
 GeneralLedgerSchema.statics.getAccountLedger = async function (
   accountCode,
   startDate,
-  endDate
+  endDate,
+  tenantId = null
 ) {
   const query = {
     accountCode: accountCode,
     status: "Active",
   };
+  if (tenantId) query.tenantId = tenantId;
 
   if (startDate || endDate) {
     query.date = {};
@@ -198,7 +202,8 @@ GeneralLedgerSchema.statics.getAccountLedger = async function (
   if (startDate) {
     const opening = await this.getAccountBalance(
       accountCode,
-      new Date(startDate)
+      new Date(startDate),
+      tenantId
     );
     openingBalance = opening.balance || 0;
   }
@@ -229,15 +234,17 @@ GeneralLedgerSchema.statics.getAccountLedger = async function (
 
 // Static method to get trial balance
 GeneralLedgerSchema.statics.getTrialBalance = async function (
-  asOfDate = new Date()
+  asOfDate = new Date(),
+  tenantId = null
 ) {
+  const match = {
+    date: { $lte: new Date(asOfDate) },
+    status: "Active",
+  };
+  if (tenantId) match.tenantId = tenantId;
+
   const result = await this.aggregate([
-    {
-      $match: {
-        date: { $lte: new Date(asOfDate) },
-        status: "Active",
-      },
-    },
+    { $match: match },
     {
       $group: {
         _id: "$accountCode",
@@ -296,16 +303,18 @@ GeneralLedgerSchema.statics.getTrialBalance = async function (
 
 // Static method to get balance sheet data
 GeneralLedgerSchema.statics.getBalanceSheet = async function (
-  asOfDate = new Date()
+  asOfDate = new Date(),
+  tenantId = null
 ) {
+  const match = {
+    date: { $lte: new Date(asOfDate) },
+    status: "Active",
+    accountType: { $in: ["Asset", "Liability", "Equity"] },
+  };
+  if (tenantId) match.tenantId = tenantId;
+
   const result = await this.aggregate([
-    {
-      $match: {
-        date: { $lte: new Date(asOfDate) },
-        status: "Active",
-        accountType: { $in: ["Asset", "Liability", "Equity"] },
-      },
-    },
+    { $match: match },
     {
       $group: {
         _id: {
@@ -373,12 +382,14 @@ GeneralLedgerSchema.statics.getBalanceSheet = async function (
 // Static method to get profit & loss statement
 GeneralLedgerSchema.statics.getProfitAndLoss = async function (
   startDate,
-  endDate
+  endDate,
+  tenantId = null
 ) {
   const query = {
     status: "Active",
     accountType: { $in: ["Revenue", "Expense"] },
   };
+  if (tenantId) query.tenantId = tenantId;
 
   if (startDate || endDate) {
     query.date = {};

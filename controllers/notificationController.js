@@ -1,5 +1,6 @@
 const Notification = require("../models/Notification");
 const User = require("../models/User");
+const NotificationService = require("../services/notificationService");
 
 // Get all notifications for logged-in user
 exports.getMyNotifications = async (req, res) => {
@@ -169,29 +170,20 @@ exports.deleteAllRead = async (req, res) => {
   }
 };
 
-// Create notification (helper function for other controllers)
+// Create notification (helper function for other controllers — delegates to NotificationService)
 exports.createNotification = async (notificationData) => {
   try {
-    const notification = await Notification.create(notificationData);
-    return notification;
+    return await NotificationService.create(notificationData);
   } catch (error) {
     console.error("Error creating notification:", error);
     throw error;
   }
 };
 
-// Create notification for all admins
+// Create notification for all admins — delegates to NotificationService
 exports.notifyAdmins = async (notificationData) => {
   try {
-    const admins = await User.find({ role: "admin", isActive: true });
-
-    const notifications = admins.map((admin) => ({
-      ...notificationData,
-      recipient: admin._id,
-    }));
-
-    await Notification.insertMany(notifications);
-    return notifications;
+    return await NotificationService.notifyAdmins(notificationData);
   } catch (error) {
     console.error("Error notifying admins:", error);
     throw error;

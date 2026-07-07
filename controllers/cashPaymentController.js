@@ -4,6 +4,7 @@ const User = require("../models/User");
 const ChartOfAccount = require("../models/ChartOfAccount");
 const JournalEntry = require("../models/JournalEntry");
 const AccountingService = require("../services/accountingService");
+const { notifyAdmins } = require("./notificationController");
 
 // @desc    Get all cash payments
 // @route   GET /api/cash-payments
@@ -158,6 +159,18 @@ exports.createCashPayment = async (req, res) => {
     await cashPayment.populate("employeeRef", "name email");
     await cashPayment.populate("createdBy", "name email");
 
+    notifyAdmins({
+      tenantId: req.tenantId,
+      sender: req.user._id,
+      type: "cash_payment_created",
+      title: "New Cash Payment",
+      message: `Cash payment ${cashPayment.serialNo} created by ${req.user.name}`,
+      entityType: "cash_payment",
+      entityId: cashPayment._id,
+      metadata: { serialNo: cashPayment.serialNo, totalAmount: cashPayment.totalAmount },
+      priority: "high",
+    }).catch(err => console.error("Notification error:", err));
+
     res.status(201).json({
       success: true,
       message: "Cash payment created successfully",
@@ -244,6 +257,7 @@ exports.updateCashPayment = async (req, res) => {
     try {
       const existingEntry = await JournalEntry.findOne({
         status: "Posted",
+        tenantId: req.tenantId,
         "sourceTransaction.model": "CashPayment",
         "sourceTransaction.id": cashPayment._id,
       });
@@ -308,6 +322,7 @@ exports.deleteCashPayment = async (req, res) => {
     try {
       const existingEntry = await JournalEntry.findOne({
         status: "Posted",
+        tenantId: req.tenantId,
         "sourceTransaction.model": "CashPayment",
         "sourceTransaction.id": cashPayment._id,
       });
@@ -348,6 +363,7 @@ exports.getCashPaymentsByProject = async (req, res) => {
   try {
     const cashPayments = await CashPayment.find({
       project: req.params.projectId,
+      tenantId: req.tenantId,
     })
       .populate("project", "name code")
       .populate("employeeRef", "name email")
@@ -384,6 +400,7 @@ exports.getCashPaymentsByDateRange = async (req, res) => {
     }
 
     const cashPayments = await CashPayment.find({
+      tenantId: req.tenantId,
       date: {
         $gte: new Date(startDate),
         $lte: new Date(endDate),

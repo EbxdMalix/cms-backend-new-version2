@@ -82,7 +82,7 @@ const corsOptions = {
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-tenant-id", "x-request-id"],
   credentials: true,
   optionsSuccessStatus: 204,
 };
@@ -126,7 +126,7 @@ const limiter = rateLimit({
   standardHeaders: true, // Return rate limit info in standard headers
   legacyHeaders: false, // Disable the X-RateLimit-* headers
   validate: false,
-  skip: (req) => req.method === "OPTIONS", // Skip CORS preflight checks from rate limits
+  skip: (req) => req.method === "OPTIONS" || process.env.NODE_ENV === "development", // Skip CORS preflights and development env from limits
   keyGenerator: (req) => {
     const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.ip || "127.0.0.1";
     return rawIp.split(",")[0].trim();
@@ -144,6 +144,14 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // Cookie parser for secure cookie handling
 app.use(cookieParser());
+
+// Initialize request-scoped AsyncLocalStorage for multi-tenant isolation
+const tenantLocalStorage = require("./utils/tenantStorage");
+app.use((req, res, next) => {
+  tenantLocalStorage.run(new Map(), () => {
+    next();
+  });
+});
 
 // Data sanitization against NoSQL query injection
 app.use((req, res, next) => {
@@ -264,6 +272,10 @@ console.log(
 // Apply database connection middleware to all routes
 app.use(ensureDbConnection);
 
+// Apply Clerk middleware globally to parse authentication headers
+const { clerkMiddleware } = require("@clerk/express");
+app.use(clerkMiddleware());
+
 // Routes
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -306,6 +318,7 @@ app.use("/api/journal-entries", journalEntryRoutes);
 app.use("/api/general-ledger", generalLedgerRoutes);
 app.use("/api/request-approvals", requestApprovalRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/system-alerts", require("./routes/systemAlertRoutes"));
 
 // Root route
 app.get("/", (req, res) => {
@@ -401,21 +414,58 @@ app.use((req, res, next) => {
 });
 
 // Centralized Production Error Boundary Middleware
-app.use((err, req, res, next) => {
-  console.error(JSON.stringify({
+app.use(async (err, req, res, next) => {
+  const errorPayload = {
     version: "1",
     level: "error",
     message: err.message,
     requestId: req.id,
     stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
     timestamp: new Date().toISOString()
-  }));
+  };
+  console.error(JSON.stringify(errorPayload));
+
+  try {
+    const SystemAlertService = require("./services/systemAlertService");
+    const crypto = require("crypto");
+    const fingerprint = crypto
+      .createHash("md5")
+      .update(`${err.code || ""}:${err.message?.slice(0, 100) || "unknown"}:${req.method || ""}:${req.path || ""}`)
+      .digest("hex");
+
+    await SystemAlertService.create({
+      tenantId: req.tenantId,
+      severity: err.status >= 500 ? "error" : "warning",
+      type: err.status === 429 ? "API_ERROR" : err.status >= 500 ? "API_ERROR" : "VALIDATION_ERROR",
+      fingerprint,
+      title: `${req.method} ${req.path} — ${err.status || 500}`,
+      message: err.message,
+      stackTrace: err.stack,
+      endpoint: req.originalUrl,
+      method: req.method,
+      userId: req.user?._id,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+      metadata: { requestId: req.id, statusCode: err.status || 500, code: err.code },
+    });
+  } catch (alertErr) {
+    console.error("SystemAlert creation failed:", alertErr.message);
+  }
 
   res.status(err.status || 500).json({
     success: false,
     requestId: req.id,
     error: process.env.NODE_ENV === "production" ? "Internal Server Error" : err.message
   });
+});
+
+// Process-level error handlers (fire-and-forget; don't prevent Vercel cold start)
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT_EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED_REJECTION:", reason);
 });
 
 // Export the Express app for Vercel serverless
@@ -428,3 +478,4 @@ if (process.env.NODE_ENV !== "production" || process.env.VERCEL !== "1") {
     console.log(`✓ Environment: ${process.env.NODE_ENV}`);
   });
 }
+// Auto-restart hook

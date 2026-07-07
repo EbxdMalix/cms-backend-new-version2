@@ -14,43 +14,60 @@ const ChartOfAccount = require("../models/ChartOfAccount");
 // @access  Private
 const getDashboardStats = async (req, res) => {
   try {
-    // Get all sales invoices
-    const salesInvoices = await SalesInvoice.find({ tenantId: req.tenantId });
-    const totalSales = salesInvoices.reduce(
-      (sum, invoice) => sum + (invoice.netTotal || 0),
-      0
-    );
+    // Determine authorization for financial data visibility
+    const canViewSales =
+      req.user.role === "admin" ||
+      (req.user.role === "custom" && req.user.customPermissions?.salesInvoice === true);
 
-    // Get all purchases and bank payments for total expenses
-    const purchases = await Purchase.find({ tenantId: req.tenantId });
-    const purchaseExpenses = purchases.reduce(
-      (sum, purchase) => sum + (purchase.netAmount || 0),
-      0
-    );
+    const canViewExpenses =
+      req.user.role === "admin" ||
+      (req.user.role === "custom" && (
+        req.user.customPermissions?.purchaseEntry === true ||
+        req.user.customPermissions?.cashPayment === true ||
+        req.user.customPermissions?.bankPayment === true
+      ));
 
-    // Get all bank payments (not cancelled)
-    const bankPayments = await BankPayment.find({
-      tenantId: req.tenantId,
-      cancel: false,
-    });
-    const bankPaymentExpenses = bankPayments.reduce(
-      (sum, payment) => sum + (payment.totalAmount || 0),
-      0
-    );
+    const canViewProfit = canViewSales && canViewExpenses;
 
-    // Get all cash payments (not cancelled)
-    const cashPayments = await CashPayment.find({
-      tenantId: req.tenantId,
-      cancel: false,
-    });
-    const cashPaymentExpenses = cashPayments.reduce(
-      (sum, payment) => sum + (payment.totalAmount || 0),
-      0
-    );
+    // Get all sales invoices conditionally
+    let totalSales = 0;
+    if (canViewSales) {
+      const salesInvoices = await SalesInvoice.find({ tenantId: req.tenantId });
+      totalSales = salesInvoices.reduce(
+        (sum, invoice) => sum + (invoice.netTotal || 0),
+        0
+      );
+    }
 
-    // Total expenses = purchases + bank payments + cash payments
-    const totalExpenses =
-      purchaseExpenses + bankPaymentExpenses + cashPaymentExpenses;
+    // Get all purchases and payments conditionally for total expenses
+    let totalExpenses = 0;
+    if (canViewExpenses) {
+      const purchases = await Purchase.find({ tenantId: req.tenantId });
+      const purchaseExpenses = purchases.reduce(
+        (sum, purchase) => sum + (purchase.netAmount || 0),
+        0
+      );
+
+      const bankPayments = await BankPayment.find({
+        tenantId: req.tenantId,
+        cancel: false,
+      });
+      const bankPaymentExpenses = bankPayments.reduce(
+        (sum, payment) => sum + (payment.totalAmount || 0),
+        0
+      );
+
+      const cashPayments = await CashPayment.find({
+        tenantId: req.tenantId,
+        cancel: false,
+      });
+      const cashPaymentExpenses = cashPayments.reduce(
+        (sum, payment) => sum + (payment.totalAmount || 0),
+        0
+      );
+
+      totalExpenses = purchaseExpenses + bankPaymentExpenses + cashPaymentExpenses;
+    }
 
     // Calculate net profit
     const netProfit = totalSales - totalExpenses;
@@ -71,52 +88,56 @@ const getDashboardStats = async (req, res) => {
     );
     const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-    // Last month's sales
-    const lastMonthSales = await SalesInvoice.find({
-      tenantId: req.tenantId,
-      date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
-    });
-    const lastMonthSalesTotal = lastMonthSales.reduce(
-      (sum, invoice) => sum + (invoice.netTotal || 0),
-      0
-    );
+    // Last month's sales conditionally
+    let lastMonthSalesTotal = 0;
+    if (canViewSales) {
+      const lastMonthSales = await SalesInvoice.find({
+        tenantId: req.tenantId,
+        date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
+      });
+      lastMonthSalesTotal = lastMonthSales.reduce(
+        (sum, invoice) => sum + (invoice.netTotal || 0),
+        0
+      );
+    }
 
-    // Last month's purchases
-    const lastMonthPurchases = await Purchase.find({
-      tenantId: req.tenantId,
-      date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
-    });
-    const lastMonthPurchaseExpenses = lastMonthPurchases.reduce(
-      (sum, purchase) => sum + (purchase.netAmount || 0),
-      0
-    );
+    // Last month's expenses conditionally
+    let lastMonthExpenses = 0;
+    if (canViewExpenses) {
+      const lastMonthPurchases = await Purchase.find({
+        tenantId: req.tenantId,
+        date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
+      });
+      const lastMonthPurchaseExpenses = lastMonthPurchases.reduce(
+        (sum, purchase) => sum + (purchase.netAmount || 0),
+        0
+      );
 
-    // Last month's bank payments
-    const lastMonthBankPayments = await BankPayment.find({
-      tenantId: req.tenantId,
-      cancel: false,
-      date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
-    });
-    const lastMonthBankPaymentExpenses = lastMonthBankPayments.reduce(
-      (sum, payment) => sum + (payment.totalAmount || 0),
-      0
-    );
+      const lastMonthBankPayments = await BankPayment.find({
+        tenantId: req.tenantId,
+        cancel: false,
+        date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
+      });
+      const lastMonthBankPaymentExpenses = lastMonthBankPayments.reduce(
+        (sum, payment) => sum + (payment.totalAmount || 0),
+        0
+      );
 
-    // Last month's cash payments
-    const lastMonthCashPayments = await CashPayment.find({
-      tenantId: req.tenantId,
-      cancel: false,
-      date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
-    });
-    const lastMonthCashPaymentExpenses = lastMonthCashPayments.reduce(
-      (sum, payment) => sum + (payment.totalAmount || 0),
-      0
-    );
+      const lastMonthCashPayments = await CashPayment.find({
+        tenantId: req.tenantId,
+        cancel: false,
+        date: { $gte: firstDayLastMonth, $lte: lastDayLastMonth },
+      });
+      const lastMonthCashPaymentExpenses = lastMonthCashPayments.reduce(
+        (sum, payment) => sum + (payment.totalAmount || 0),
+        0
+      );
 
-    const lastMonthExpenses =
-      lastMonthPurchaseExpenses +
-      lastMonthBankPaymentExpenses +
-      lastMonthCashPaymentExpenses;
+      lastMonthExpenses =
+        lastMonthPurchaseExpenses +
+        lastMonthBankPaymentExpenses +
+        lastMonthCashPaymentExpenses;
+    }
     const lastMonthProfit = lastMonthSalesTotal - lastMonthExpenses;
 
     // Calculate percentage changes
@@ -134,6 +155,7 @@ const getDashboardStats = async (req, res) => {
     const profitChange = calculateChange(netProfit, lastMonthProfit);
     const lastMonthActiveProjects = await Project.countDocuments({
       status: "Active",
+      tenantId: req.tenantId,
       createdAt: { $lt: firstDayThisMonth },
     });
 
@@ -145,12 +167,12 @@ const getDashboardStats = async (req, res) => {
       success: true,
       data: {
         stats: {
-          totalExpenses,
-          expensesChange,
-          totalSales,
-          salesChange,
-          netProfit,
-          profitChange,
+          totalExpenses: canViewExpenses ? totalExpenses : null,
+          expensesChange: canViewExpenses ? expensesChange : null,
+          totalSales: canViewSales ? totalSales : null,
+          salesChange: canViewSales ? salesChange : null,
+          netProfit: canViewProfit ? netProfit : null,
+          profitChange: canViewProfit ? profitChange : null,
           activeProjects: activeProjectsCount,
           projectsChange,
         },
