@@ -70,7 +70,9 @@ const allowedOrigins = [
   "http://127.0.0.1:3000",
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   process.env.FRONTEND_URL,
-].filter(Boolean);
+]
+  .filter(Boolean)
+  .map((url) => url.trim().replace(/\/$/, ""));
 
 const corsOptions = {
   origin: function (origin, callback) {
@@ -425,37 +427,45 @@ app.use(async (err, req, res, next) => {
   };
   console.error(JSON.stringify(errorPayload));
 
-  try {
-    const mongoose = require("mongoose");
-    if (mongoose.connection.readyState !== 1) {
-      const connectDB = require("./db/db");
-      await connectDB();
+  // Bypass DB writes for CORS and Rate Limiting errors to prevent DB exhaustion and 504 timeouts
+  const isCorsError = err.message && err.message.includes("Not allowed by CORS");
+  const isRateLimitError = err.status === 429 || err.statusCode === 429;
+
+  if (!isCorsError && !isRateLimitError) {
+    try {
+      const mongoose = require("mongoose");
+      if (mongoose.connection.readyState !== 1) {
+        const connectDB = require("./db/db");
+        await connectDB();
+      }
+
+      const SystemAlertService = require("./services/systemAlertService");
+      const crypto = require("crypto");
+      const fingerprint = crypto
+        .createHash("md5")
+        .update(`${err.code || ""}:${err.message?.slice(0, 100) || "unknown"}:${req.method || ""}:${req.path || ""}`)
+        .digest("hex");
+
+      await SystemAlertService.create({
+        tenantId: req.tenantId,
+        severity: err.status >= 500 ? "error" : "warning",
+        type: err.status === 429 ? "API_ERROR" : err.status >= 500 ? "API_ERROR" : "VALIDATION_ERROR",
+        fingerprint,
+        title: `${req.method} ${req.path} — ${err.status || 500}`,
+        message: err.message,
+        stackTrace: err.stack,
+        endpoint: req.originalUrl,
+        method: req.method,
+        userId: req.user?._id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        metadata: { requestId: req.id, statusCode: err.status || 500, code: err.code },
+      });
+    } catch (alertErr) {
+      console.error("SystemAlert creation failed:", alertErr.message);
     }
-
-    const SystemAlertService = require("./services/systemAlertService");
-    const crypto = require("crypto");
-    const fingerprint = crypto
-      .createHash("md5")
-      .update(`${err.code || ""}:${err.message?.slice(0, 100) || "unknown"}:${req.method || ""}:${req.path || ""}`)
-      .digest("hex");
-
-    await SystemAlertService.create({
-      tenantId: req.tenantId,
-      severity: err.status >= 500 ? "error" : "warning",
-      type: err.status === 429 ? "API_ERROR" : err.status >= 500 ? "API_ERROR" : "VALIDATION_ERROR",
-      fingerprint,
-      title: `${req.method} ${req.path} — ${err.status || 500}`,
-      message: err.message,
-      stackTrace: err.stack,
-      endpoint: req.originalUrl,
-      method: req.method,
-      userId: req.user?._id,
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-      metadata: { requestId: req.id, statusCode: err.status || 500, code: err.code },
-    });
-  } catch (alertErr) {
-    console.error("SystemAlert creation failed:", alertErr.message);
+  } else {
+    console.warn(`Bypassed DB system alert logging for: ${isCorsError ? "CORS error" : "Rate limit error"} — ${err.message}`);
   }
 
   res.status(err.status || 500).json({
