@@ -426,6 +426,12 @@ app.use(async (err, req, res, next) => {
   console.error(JSON.stringify(errorPayload));
 
   try {
+    const mongoose = require("mongoose");
+    if (mongoose.connection.readyState !== 1) {
+      const connectDB = require("./db/db");
+      await connectDB();
+    }
+
     const SystemAlertService = require("./services/systemAlertService");
     const crypto = require("crypto");
     const fingerprint = crypto
