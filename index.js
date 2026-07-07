@@ -92,6 +92,14 @@ const corsOptions = {
 // 3. CORS configuration
 app.use(cors(corsOptions));
 
+// Explicitly handle and terminate any remaining OPTIONS requests to prevent fall-through and 504 timeouts
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+
 // Set security HTTP headers using Helmet
 app.use(
   helmet({
